@@ -1,0 +1,445 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Scenario 3 - Quick user identity enters AgentCore as an Entra access token;
+  AgentCore performs standard Microsoft on-behalf-of token exchange to two
+  independently protected HTTP APIs and their existing business Lambdas.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: quick-s3
+    AllowedPattern: '^[a-z][a-z0-9-]{2,20}$'
+  OrderToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:order-tool(?::[^:]+)?$'
+    Description: Predeployed Scenario 3 order Lambda that requires the OrdersReader user app role.
+  InventoryToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:inventory-tool(?::[^:]+)?$'
+  EntraTenantId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  GatewayApiApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  QuickClientApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  OrderApiApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  InventoryApiApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  GatewayInboundScope:
+    Type: String
+    Default: mcp.invoke
+  OrderRequiredRole:
+    Type: String
+    Default: OrdersReader
+    AllowedValues:
+      - OrdersReader
+  InventoryRequiredRole:
+    Type: String
+    Default: InventoryReader
+    AllowedValues:
+      - InventoryReader
+  GatewayOboClientSecretArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  GatewayOboClientSecretJsonKey:
+    Type: String
+    Default: clientSecret
+    AllowedValues:
+      - clientSecret
+  StageName:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[a-zA-Z0-9_-]+$'
+
+Rules:
+  DistinctEntraApplications:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref GatewayApiApplicationId, !Ref QuickClientApplicationId]
+        AssertDescription: Gateway API and Quick Client application IDs must differ.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref GatewayApiApplicationId, !Ref OrderApiApplicationId]
+        AssertDescription: Gateway API and Order API application IDs must differ.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref GatewayApiApplicationId, !Ref InventoryApiApplicationId]
+        AssertDescription: Gateway API and Inventory API application IDs must differ.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref QuickClientApplicationId, !Ref OrderApiApplicationId]
+        AssertDescription: Quick Client and Order API application IDs must differ.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref QuickClientApplicationId, !Ref InventoryApiApplicationId]
+        AssertDescription: Quick Client and Inventory API application IDs must differ.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals: [!Ref OrderApiApplicationId, !Ref InventoryApiApplicationId]
+        AssertDescription: Order API and Inventory API application IDs must differ.
+
+Resources:
+  OrderHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${Prefix}-order-entra-api'
+      Description: Order API with native Entra JWT authorization
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: false
+      Tags:
+        Project: quick-agentcore-security-blog
+        Scenario: entra-obo
+
+  OrderAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${Prefix}-order-entra-api-access'
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: entra-obo
+
+  OrderIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref OrderHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !Ref OrderToolLambdaArn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 10000
+
+  OrderJwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref OrderHttpApi
+      Name: !Sub '${Prefix}-order-entra-jwt'
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Ref OrderApiApplicationId
+        Issuer: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0'
+
+  OrderRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref OrderHttpApi
+      RouteKey: POST /order-requirements
+      AuthorizationType: JWT
+      AuthorizerId: !Ref OrderJwtAuthorizer
+      AuthorizationScopes:
+        - Orders.Read
+      Target: !Sub 'integrations/${OrderIntegration}'
+
+  OrderStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref OrderHttpApi
+      StageName: !Ref StageName
+      AutoDeploy: true
+      StageVariables:
+        authorizationMode: ENTRA_DELEGATED_USER_ROLE
+        requiredUserRole: !Ref OrderRequiredRole
+        expectedAuthorizedParty: !Ref GatewayApiApplicationId
+      AccessLogSettings:
+        DestinationArn: !GetAtt OrderAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTimeEpoch":"$context.requestTimeEpoch","apiId":"$context.apiId","stage":"$context.stage","routeKey":"$context.routeKey","httpMethod":"$context.httpMethod","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","authorizerError":"$context.authorizer.error","errorResponseType":"$context.error.responseType","errorMessage":"$context.error.message","integrationStatus":"$context.integrationStatus","integrationErrorMessage":"$context.integrationErrorMessage"}
+      Tags:
+        Project: quick-agentcore-security-blog
+
+  OrderLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrderToolLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OrderHttpApi}/${StageName}/POST/order-requirements'
+
+  InventoryHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${Prefix}-inventory-entra-api'
+      Description: Inventory API with native Entra JWT authorization
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: false
+      Tags:
+        Project: quick-agentcore-security-blog
+        Scenario: entra-obo
+
+  InventoryAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${Prefix}-inventory-entra-api-access'
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: entra-obo
+
+  InventoryIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref InventoryHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !Ref InventoryToolLambdaArn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 10000
+
+  InventoryJwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref InventoryHttpApi
+      Name: !Sub '${Prefix}-inventory-entra-jwt'
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Ref InventoryApiApplicationId
+        Issuer: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0'
+
+  InventoryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref InventoryHttpApi
+      RouteKey: POST /inventory-availability
+      AuthorizationType: JWT
+      AuthorizerId: !Ref InventoryJwtAuthorizer
+      AuthorizationScopes:
+        - Inventory.Read
+      Target: !Sub 'integrations/${InventoryIntegration}'
+
+  InventoryStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref InventoryHttpApi
+      StageName: !Ref StageName
+      AutoDeploy: true
+      StageVariables:
+        authorizationMode: ENTRA_DELEGATED_USER_ROLE
+        requiredUserRole: !Ref InventoryRequiredRole
+        expectedAuthorizedParty: !Ref GatewayApiApplicationId
+      AccessLogSettings:
+        DestinationArn: !GetAtt InventoryAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTimeEpoch":"$context.requestTimeEpoch","apiId":"$context.apiId","stage":"$context.stage","routeKey":"$context.routeKey","httpMethod":"$context.httpMethod","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","authorizerError":"$context.authorizer.error","errorResponseType":"$context.error.responseType","errorMessage":"$context.error.message","integrationStatus":"$context.integrationStatus","integrationErrorMessage":"$context.integrationErrorMessage"}
+      Tags:
+        Project: quick-agentcore-security-blog
+
+  InventoryLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryToolLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${InventoryHttpApi}/${StageName}/POST/inventory-availability'
+
+  MicrosoftOboProvider:
+    Type: AWS::BedrockAgentCore::OAuth2CredentialProvider
+    Properties:
+      Name: !Sub '${Prefix}-microsoft-obo'
+      CredentialProviderVendor: MicrosoftOauth2
+      Oauth2ProviderConfigInput:
+        MicrosoftOauth2ProviderConfig:
+          ClientId: !Ref GatewayApiApplicationId
+          ClientSecretSource: EXTERNAL
+          ClientSecretConfig:
+            SecretId: !Ref GatewayOboClientSecretArn
+            JsonKey: !Ref GatewayOboClientSecretJsonKey
+          TenantId: !Ref EntraTenantId
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: entra-obo
+
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AgentCore Microsoft OBO token-exchange role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*'
+      Policies:
+        - PolicyName: MicrosoftOnBehalfOf
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GetWorkloadTokens
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Sid: GetMicrosoftOboToken
+                Effect: Allow
+                Action: bedrock-agentcore:GetResourceOauth2Token
+                Resource:
+                  - !GetAtt MicrosoftOboProvider.CredentialProviderArn
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Sid: ReadOnlyMicrosoftClientSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GatewayOboClientSecretArn
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub '${Prefix}-gateway'
+      Description: Microsoft Entra user delegation with downstream OBO
+      RoleArn: !GetAtt GatewayRole.Arn
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0/.well-known/openid-configuration'
+          AllowedAudience:
+            - !Ref GatewayApiApplicationId
+          AllowedScopes:
+            - !Ref GatewayInboundScope
+          CustomClaims:
+            - InboundTokenClaimName: tid
+              InboundTokenClaimValueType: STRING
+              AuthorizingClaimMatchValue:
+                ClaimMatchValue:
+                  MatchValueString: !Ref EntraTenantId
+                ClaimMatchOperator: EQUALS
+            - InboundTokenClaimName: azp
+              InboundTokenClaimValueType: STRING
+              AuthorizingClaimMatchValue:
+                ClaimMatchValue:
+                  MatchValueString: !Ref QuickClientApplicationId
+                ClaimMatchOperator: EQUALS
+      Tags:
+        Project: quick-agentcore-security-blog
+        Scenario: entra-obo
+
+  OrderTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    DependsOn: OrderStage
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-order-obo'
+      Description: Order HTTP API using a Microsoft OBO token
+      TargetConfiguration:
+        Mcp:
+          OpenApiSchema:
+            InlinePayload: !Sub |
+              {
+                "openapi":"3.0.1",
+                "info":{"title":"Entra OBO Order Service","version":"1.0.0"},
+                "servers":[{"url":"https://${OrderHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}"}],
+                "paths":{"/order-requirements":{"post":{
+                  "operationId":"get_order_requirements",
+                  "summary":"Get complete aggregated order requirements",
+                  "security":[{"entraOboBearer":["Orders.Read"]}],
+                  "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["order_id"],"properties":{"order_id":{"type":"string","pattern":"^ORDER-[A-Z0-9-]{1,32}$","minLength":7,"maxLength":38}}}}}},
+                  "responses":{"200":{"description":"Order result for an OrdersReader user"},"400":{"description":"Invalid input"},"401":{"description":"Invalid token"},"403":{"description":"OrdersReader role required"}}
+                }}},
+                "components":{"securitySchemes":{"entraOboBearer":{"type":"oauth2","flows":{"authorizationCode":{"authorizationUrl":"https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/authorize","tokenUrl":"https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/token","scopes":{"Orders.Read":"Read order requirements"}}}}}}
+              }
+      CredentialProviderConfigurations:
+        - CredentialProviderType: OAUTH
+          CredentialProvider:
+            OauthCredentialProvider:
+              ProviderArn: !GetAtt MicrosoftOboProvider.CredentialProviderArn
+              Scopes:
+                - !Sub 'api://${OrderApiApplicationId}/Orders.Read'
+              GrantType: TOKEN_EXCHANGE
+
+  InventoryTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    DependsOn: InventoryStage
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-inventory-obo'
+      Description: Inventory HTTP API using a Microsoft OBO token
+      TargetConfiguration:
+        Mcp:
+          OpenApiSchema:
+            InlinePayload: !Sub |
+              {
+                "openapi":"3.0.1",
+                "info":{"title":"Entra OBO Inventory Service","version":"1.0.0"},
+                "servers":[{"url":"https://${InventoryHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}"}],
+                "paths":{"/inventory-availability":{"post":{
+                  "operationId":"check_inventory_availability",
+                  "summary":"Validate order handoff and calculate inventory risk",
+                  "security":[{"entraOboBearer":["Inventory.Read"]}],
+                  "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["order_id","requirements","requirements_checksum"],"properties":{"order_id":{"type":"string","pattern":"^ORDER-[A-Z0-9-]{1,32}$","minLength":7,"maxLength":38},"requirements_checksum":{"type":"string","pattern":"^[0-9a-f]{64}$"},"requirements":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"object","additionalProperties":false,"required":["sku","warehouse_id","required_quantity"],"properties":{"sku":{"type":"string","pattern":"^[A-Z0-9-]{1,32}$"},"warehouse_id":{"type":"string","pattern":"^[A-Z0-9-]{1,32}$"},"required_quantity":{"type":"integer","minimum":1,"maximum":1000000}}}}}}}}},
+                  "responses":{"200":{"description":"Inventory result"},"400":{"description":"Invalid handoff"},"401":{"description":"Invalid token"},"403":{"description":"InventoryReader role required"}}
+                }}},
+                "components":{"securitySchemes":{"entraOboBearer":{"type":"oauth2","flows":{"authorizationCode":{"authorizationUrl":"https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/authorize","tokenUrl":"https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/token","scopes":{"Inventory.Read":"Read inventory availability"}}}}}}
+              }
+      CredentialProviderConfigurations:
+        - CredentialProviderType: OAUTH
+          CredentialProvider:
+            OauthCredentialProvider:
+              ProviderArn: !GetAtt MicrosoftOboProvider.CredentialProviderArn
+              Scopes:
+                - !Sub 'api://${InventoryApiApplicationId}/Inventory.Read'
+              GrantType: TOKEN_EXCHANGE
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt Gateway.GatewayArn
+  GatewayIdentifier:
+    Value: !GetAtt Gateway.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt Gateway.GatewayUrl
+  OrderTargetId:
+    Value: !GetAtt OrderTarget.TargetId
+  InventoryTargetId:
+    Value: !GetAtt InventoryTarget.TargetId
+  OrderApiId:
+    Value: !Ref OrderHttpApi
+  OrderApiBaseUrl:
+    Value: !Sub 'https://${OrderHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}'
+  InventoryApiId:
+    Value: !Ref InventoryHttpApi
+  InventoryApiBaseUrl:
+    Value: !Sub 'https://${InventoryHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}'
+  MicrosoftCredentialProviderArn:
+    Value: !GetAtt MicrosoftOboProvider.CredentialProviderArn
+  EntraIssuer:
+    Value: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0'
+  OrderDelegatedScope:
+    Value: !Sub 'api://${OrderApiApplicationId}/Orders.Read'
+  OrderRequiredUserRole:
+    Value: !Ref OrderRequiredRole
+  InventoryDelegatedScope:
+    Value: !Sub 'api://${InventoryApiApplicationId}/Inventory.Read'
+  InventoryRequiredUserRole:
+    Value: !Ref InventoryRequiredRole

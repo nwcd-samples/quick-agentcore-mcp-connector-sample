@@ -1,0 +1,15 @@
+[
+  {"ParameterKey":"Prefix","ParameterValue":"quick-agentcore-s3"},
+  {"ParameterKey":"OrderToolLambdaArn","ParameterValue":"arn:aws:lambda:us-east-1:271547278201:function:order-tool"},
+  {"ParameterKey":"InventoryToolLambdaArn","ParameterValue":"arn:aws:lambda:us-east-1:271547278201:function:inventory-tool"},
+  {"ParameterKey":"EntraTenantId","ParameterValue":"538f4efe-0a59-4988-98a0-2071f828fb70"},
+  {"ParameterKey":"GatewayApiApplicationId","ParameterValue":"9ce6d440-8157-4eb2-b584-e2783753a471"},
+  {"ParameterKey":"QuickClientApplicationId","ParameterValue":"2ebd767d-0113-48fe-bedc-341adf395ee3"},
+  {"ParameterKey":"OrderApiApplicationId","ParameterValue":"2b28ab5c-67ca-4e77-9531-d8b1babf2dcc"},
+  {"ParameterKey":"InventoryApiApplicationId","ParameterValue":"440d110d-e785-4211-b7c7-d823acf1ad25"},
+  {"ParameterKey":"GatewayInboundScope","ParameterValue":"mcp.invoke"},
+  {"ParameterKey":"OrderRequiredRole","ParameterValue":"OrdersReader"},
+  {"ParameterKey":"InventoryRequiredRole","ParameterValue":"InventoryReader"},
+  {"ParameterKey":"GatewayOboClientSecretArn","ParameterValue":"arn:aws:secretsmanager:us-east-1:271547278201:secret:quick-agentcore-s3-gateway-obo-2EJVe9"},
+  {"ParameterKey":"GatewayOboClientSecretJsonKey","ParameterValue":"clientSecret"}
+]

@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Scenario 2 - order-basic-auth-tool behind a REST API that passes Basic auth
+  to the application, and inventory-tool behind a tenant-specific Microsoft
+  Entra app-only HTTP API. AgentCore uses client credentials with .default;
+  the API validates JWTs natively and Lambda authorizes trusted app claims.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: quick-s2
+    AllowedPattern: '^[a-z][a-z0-9-]{2,20}$'
+  CognitoDomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+  GatewayScopeIdentifier:
+    Type: String
+    Default: https://quick-agentcore.example.com/scenario2
+  OrderBasicAuthToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:order-basic-auth-tool(?::[^:]+)?$'
+  InventoryToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:inventory-tool(?::[^:]+)?$'
+  OrderBasicSecretArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+    Description: Secret containing only the base64(username:password) payload.
+  OrderBasicSecretJsonKey:
+    Type: String
+    Default: base64Credentials
+    AllowedValues:
+      - base64Credentials
+  EntraTenantId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    Description: Tenant that issues Inventory API v2 access tokens.
+  InventoryApiApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    Description: Audience of the Inventory resource API.
+  InventoryClientApplicationId:
+    Type: String
+    AllowedPattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    Description: Dedicated AgentCore confidential client allowed to call Inventory.
+  InventoryOAuthClientSecretArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  InventoryOAuthClientSecretJsonKey:
+    Type: String
+    Default: clientSecret
+    AllowedValues:
+      - clientSecret
+  InventoryAppRole:
+    Type: String
+    Default: InventoryReader
+    AllowedValues:
+      - InventoryReader
+    Description: Entra application permission required in the roles claim.
+  StageName:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[a-zA-Z0-9_-]+$'
+
+Rules:
+  DistinctInventoryApplications:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: InventoryApiApplicationId
+                - Ref: InventoryClientApplicationId
+        AssertDescription: Inventory API and AgentCore client application IDs must differ.
+
+Resources:
+  InboundIdentity:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/cognito-m2m.yaml
+      Parameters:
+        Prefix: !Sub '${Prefix}-inbound'
+        DomainPrefix: !Ref CognitoDomainPrefix
+        ScopeIdentifier: !Ref GatewayScopeIdentifier
+        ScopeName: invoke
+
+  ServiceApis:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/mixed-auth-rest-apis.yaml
+      Parameters:
+        Prefix: !Ref Prefix
+        OrderBasicAuthToolLambdaArn: !Ref OrderBasicAuthToolLambdaArn
+        InventoryToolLambdaArn: !Ref InventoryToolLambdaArn
+        EntraTenantId: !Ref EntraTenantId
+        InventoryApiApplicationId: !Ref InventoryApiApplicationId
+        InventoryClientApplicationId: !Ref InventoryClientApplicationId
+        InventoryAppRole: !Ref InventoryAppRole
+        StageName: !Ref StageName
+
+  OrderBasicProvider:
+    Type: AWS::BedrockAgentCore::ApiKeyCredentialProvider
+    Properties:
+      Name: !Sub '${Prefix}-order-basic'
+      ApiKeySecretSource: EXTERNAL
+      ApiKeySecretConfig:
+        SecretId: !Ref OrderBasicSecretArn
+        JsonKey: !Ref OrderBasicSecretJsonKey
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+
+  InventoryOAuthProvider:
+    Type: AWS::BedrockAgentCore::OAuth2CredentialProvider
+    Properties:
+      Name: !Sub '${Prefix}-inventory-oauth'
+      CredentialProviderVendor: CustomOauth2
+      Oauth2ProviderConfigInput:
+        CustomOauth2ProviderConfig:
+          OauthDiscovery:
+            DiscoveryUrl: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0/.well-known/openid-configuration'
+          ClientId: !Ref InventoryClientApplicationId
+          ClientSecretSource: EXTERNAL
+          ClientSecretConfig:
+            SecretId: !Ref InventoryOAuthClientSecretArn
+            JsonKey: !Ref InventoryOAuthClientSecretJsonKey
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AgentCore mixed-auth credential role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*'
+      Policies:
+        - PolicyName: MixedOutboundCredentials
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GetWorkloadAccessToken
+                Effect: Allow
+                Action: bedrock-agentcore:GetWorkloadAccessToken
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Sid: GetOrderApiKey
+                Effect: Allow
+                Action: bedrock-agentcore:GetResourceApiKey
+                Resource:
+                  - !GetAtt OrderBasicProvider.CredentialProviderArn
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Sid: GetInventoryOAuthToken
+                Effect: Allow
+                Action: bedrock-agentcore:GetResourceOauth2Token
+                Resource:
+                  - !GetAtt InventoryOAuthProvider.CredentialProviderArn
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Sid: ReadOnlyReferencedCredentialSecrets
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref OrderBasicSecretArn
+                  - !Ref InventoryOAuthClientSecretArn
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub '${Prefix}-gateway'
+      Description: Legacy Basic order plus OAuth inventory
+      RoleArn: !GetAtt GatewayRole.Arn
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !GetAtt InboundIdentity.Outputs.DiscoveryUrl
+          AllowedClients:
+            - !GetAtt InboundIdentity.Outputs.ClientId
+          AllowedScopes:
+            - !GetAtt InboundIdentity.Outputs.Scope
+      Tags:
+        Project: quick-agentcore-security-blog
+        Scenario: mixed-auth
+
+  OrderTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-order-basic'
+      Description: Explicit OpenAPI target for the legacy Basic-auth order API
+      TargetConfiguration:
+        Mcp:
+          OpenApiSchema:
+            InlinePayload: !Sub
+              - |
+                {
+                  "openapi": "3.0.0",
+                  "info": {"title": "Scenario 2 Order API", "version": "1.0"},
+                  "servers": [{"url": "${ApiBaseUrl}"}],
+                  "components": {
+                    "securitySchemes": {
+                      "orderBasicAuth": {"type": "http", "scheme": "basic"}
+                    }
+                  },
+                  "paths": {
+                    "/order-requirements": {
+                      "post": {
+                        "operationId": "get_order_requirements",
+                        "description": "Always call this read-only tool first when a user asks to verify an order against inventory. It returns the complete, validated and aggregated SKU/warehouse requirements for the order. On SUCCESS, pass order_id, requirements and requirements_checksum unchanged to check_inventory_availability. Never invent or modify quantities",
+                        "security": [{"orderBasicAuth": []}],
+                        "requestBody": {
+                          "required": true,
+                          "content": {
+                            "application/json": {
+                              "schema": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["order_id"],
+                                "properties": {
+                                  "order_id": {"type": "string", "pattern": "^ORDER-[A-Z0-9-]{1,32}$", "minLength": 7, "maxLength": 38}
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "responses": {
+                          "200": {"description": "Order result"},
+                          "400": {"description": "Invalid input"},
+                          "401": {"description": "Invalid Basic credentials"}
+                        }
+                      }
+                    }
+                  }
+                }
+              - ApiBaseUrl: !GetAtt ServiceApis.Outputs.OrderApiBaseUrl
+      CredentialProviderConfigurations:
+        - CredentialProviderType: API_KEY
+          CredentialProvider:
+            ApiKeyCredentialProvider:
+              ProviderArn: !GetAtt OrderBasicProvider.CredentialProviderArn
+              CredentialLocation: HEADER
+              CredentialParameterName: Authorization
+              CredentialPrefix: Basic
+
+  InventoryTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-inventory-oauth'
+      Description: Explicit OpenAPI target for the Entra app-only inventory API
+      TargetConfiguration:
+        Mcp:
+          OpenApiSchema:
+            InlinePayload: !Sub
+              - |
+                {
+                  "openapi": "3.0.0",
+                  "info": {"title": "Scenario 2 Inventory API", "version": "1.0"},
+                  "servers": [{"url": "${ApiBaseUrl}"}],
+                  "components": {
+                    "securitySchemes": {
+                      "inventoryOauth": {
+                        "type": "oauth2",
+                        "flows": {
+                          "clientCredentials": {
+                            "tokenUrl": "${TokenUrl}",
+                            "scopes": {"${OAuthScope}": "Read inventory availability"}
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "paths": {
+                    "/inventory-availability": {
+                      "post": {
+                        "operationId": "check_inventory_availability",
+                        "description": "Call this read-only tool only after get_order_requirements returns SUCCESS. Pass its order_id, requirements and requirements_checksum unchanged. This tool validates the handoff, reads available inventory, and deterministically returns shortages, partial failures and fulfillment risk. Do not calculate quantities yourself",
+                        "security": [{"inventoryOauth": ["${OAuthScope}"]}],
+                        "requestBody": {
+                          "required": true,
+                          "content": {
+                            "application/json": {
+                              "schema": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["order_id", "requirements", "requirements_checksum"],
+                                "properties": {
+                                  "order_id": {"type": "string", "pattern": "^ORDER-[A-Z0-9-]{1,32}$", "minLength": 7, "maxLength": 38},
+                                  "requirements_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                  "requirements": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 50,
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": ["sku", "warehouse_id", "required_quantity"],
+                                      "properties": {
+                                        "sku": {"type": "string", "pattern": "^[A-Z0-9-]{1,32}$"},
+                                        "warehouse_id": {"type": "string", "pattern": "^[A-Z0-9-]{1,32}$"},
+                                        "required_quantity": {"type": "integer", "minimum": 1, "maximum": 1000000}
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "responses": {
+                          "200": {"description": "Inventory result"},
+                          "400": {"description": "Invalid input or checksum"},
+                          "401": {"description": "Invalid access token"},
+                          "403": {"description": "Wrong tenant/client or missing InventoryReader app role"}
+                        }
+                      }
+                    }
+                  }
+                }
+              - ApiBaseUrl: !GetAtt ServiceApis.Outputs.InventoryApiBaseUrl
+                TokenUrl: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/token'
+                OAuthScope: !Sub 'api://${InventoryApiApplicationId}/.default'
+      CredentialProviderConfigurations:
+        - CredentialProviderType: OAUTH
+          CredentialProvider:
+            OauthCredentialProvider:
+              ProviderArn: !GetAtt InventoryOAuthProvider.CredentialProviderArn
+              Scopes:
+                - !Sub 'api://${InventoryApiApplicationId}/.default'
+              GrantType: CLIENT_CREDENTIALS
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt Gateway.GatewayArn
+  GatewayIdentifier:
+    Value: !GetAtt Gateway.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt Gateway.GatewayUrl
+  OrderTargetId:
+    Value: !GetAtt OrderTarget.TargetId
+  InventoryTargetId:
+    Value: !GetAtt InventoryTarget.TargetId
+  OrderApiId:
+    Value: !GetAtt ServiceApis.Outputs.OrderApiId
+  OrderApiBaseUrl:
+    Value: !GetAtt ServiceApis.Outputs.OrderApiBaseUrl
+  InventoryApiId:
+    Value: !GetAtt ServiceApis.Outputs.InventoryApiId
+  InventoryApiBaseUrl:
+    Value: !GetAtt ServiceApis.Outputs.InventoryApiBaseUrl
+  InboundUserPoolId:
+    Value: !GetAtt InboundIdentity.Outputs.UserPoolId
+  InboundClientId:
+    Value: !GetAtt InboundIdentity.Outputs.ClientId
+  InboundScope:
+    Value: !GetAtt InboundIdentity.Outputs.Scope
+  InboundTokenEndpoint:
+    Value: !GetAtt InboundIdentity.Outputs.TokenEndpoint
+  OrderCredentialProviderArn:
+    Value: !GetAtt OrderBasicProvider.CredentialProviderArn
+  InventoryCredentialProviderArn:
+    Value: !GetAtt InventoryOAuthProvider.CredentialProviderArn
+  InventoryEntraIssuer:
+    Value: !Sub 'https://login.microsoftonline.com/${EntraTenantId}/v2.0'
+  InventoryOAuthTokenScope:
+    Value: !Sub 'api://${InventoryApiApplicationId}/.default'
+  InventoryRequiredAppRole:
+    Value: !Ref InventoryAppRole

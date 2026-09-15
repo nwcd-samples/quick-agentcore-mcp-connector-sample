@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Cognito machine-to-machine identity for a Quick MCP Connector to invoke one
+  AgentCore Gateway. The generated client secret is intentionally not output.
+
+Parameters:
+  Prefix:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{2,30}$'
+    Description: Lowercase resource-name prefix.
+  DomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+    Description: Region-unique Cognito hosted-domain prefix.
+  ScopeIdentifier:
+    Type: String
+    MinLength: 3
+    MaxLength: 256
+    Description: Cognito resource-server identifier, without the scope suffix.
+  ScopeName:
+    Type: String
+    Default: invoke
+    AllowedPattern: '^[a-zA-Z0-9._-]+$'
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${Prefix}-pool'
+      DeletionProtection: INACTIVE
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 16
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      UserPoolTags:
+        Project: quick-agentcore-security-blog
+        Component: gateway-inbound-identity
+
+  ResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      Identifier: !Ref ScopeIdentifier
+      Name: !Sub '${Prefix}-resource-server'
+      Scopes:
+        - ScopeName: !Ref ScopeName
+          ScopeDescription: Invoke the read-only AgentCore MCP Gateway
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: ResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub '${Prefix}-quick-m2m-client'
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - !Sub '${ScopeIdentifier}/${ScopeName}'
+      AccessTokenValidity: 15
+      TokenValidityUnits:
+        AccessToken: minutes
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref DomainPrefix
+      UserPoolId: !Ref UserPool
+
+Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolArn:
+    Value: !GetAtt UserPool.Arn
+  ClientId:
+    Value: !Ref UserPoolClient
+  Scope:
+    Value: !Sub '${ScopeIdentifier}/${ScopeName}'
+  Issuer:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}'
+  DiscoveryUrl:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}/.well-known/openid-configuration'
+  TokenEndpoint:
+    Value: !Sub 'https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token'

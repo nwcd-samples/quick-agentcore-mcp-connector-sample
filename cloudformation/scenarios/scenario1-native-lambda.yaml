@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Scenario 1 - Quick authenticates to AgentCore with Cognito M2M; AgentCore
+  invokes exactly order-tool and inventory-tool as native Lambda targets.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: quick-s1
+    AllowedPattern: '^[a-z][a-z0-9-]{2,20}$'
+  CognitoDomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+    Description: Region-unique lowercase Cognito hosted-domain prefix.
+  GatewayScopeIdentifier:
+    Type: String
+    Default: https://quick-agentcore.example.com/scenario1
+  OrderToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:order-tool(?::[^:]+)?$'
+  InventoryToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:inventory-tool(?::[^:]+)?$'
+
+Resources:
+  InboundIdentity:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/cognito-m2m.yaml
+      Parameters:
+        Prefix: !Sub '${Prefix}-inbound'
+        DomainPrefix: !Ref CognitoDomainPrefix
+        ScopeIdentifier: !Ref GatewayScopeIdentifier
+        ScopeName: invoke
+
+  NativeGateway:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/native-lambda-gateway.yaml
+      Parameters:
+        Prefix: !Ref Prefix
+        OrderToolLambdaArn: !Ref OrderToolLambdaArn
+        InventoryToolLambdaArn: !Ref InventoryToolLambdaArn
+        DiscoveryUrl: !GetAtt InboundIdentity.Outputs.DiscoveryUrl
+        AllowedClientId: !GetAtt InboundIdentity.Outputs.ClientId
+        AllowedScope: !GetAtt InboundIdentity.Outputs.Scope
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt NativeGateway.Outputs.GatewayArn
+  GatewayIdentifier:
+    Value: !GetAtt NativeGateway.Outputs.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt NativeGateway.Outputs.GatewayUrl
+  OrderTargetId:
+    Value: !GetAtt NativeGateway.Outputs.OrderTargetId
+  InventoryTargetId:
+    Value: !GetAtt NativeGateway.Outputs.InventoryTargetId
+  InboundUserPoolId:
+    Value: !GetAtt InboundIdentity.Outputs.UserPoolId
+  InboundClientId:
+    Value: !GetAtt InboundIdentity.Outputs.ClientId
+  InboundScope:
+    Value: !GetAtt InboundIdentity.Outputs.Scope
+  InboundTokenEndpoint:
+    Value: !GetAtt InboundIdentity.Outputs.TokenEndpoint

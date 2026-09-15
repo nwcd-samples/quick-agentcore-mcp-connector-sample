@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Scenario 4 - Quick reaches AgentCore Gateway through PrivateLink while OAuth
+  uses the public Cognito token endpoint; dedicated business Lambdas run in VPC.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: quick-s4
+    AllowedPattern: '^[a-z][a-z0-9-]{2,20}$'
+  CognitoDomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+  GatewayScopeIdentifier:
+    Type: String
+    Default: https://quick-agentcore.example.com/scenario4
+  QuickVpcConnectionId:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
+    Description: Unique Quick VPC Connection ID; do not reuse a recently deleted value.
+  VpcCidr:
+    Type: String
+    Default: 10.77.0.0/16
+  SubnetCidrA:
+    Type: String
+    Default: 10.77.1.0/24
+  SubnetCidrB:
+    Type: String
+    Default: 10.77.2.0/24
+  ResolverIpAddressA:
+    Type: String
+    Default: 10.77.1.10
+  ResolverIpAddressB:
+    Type: String
+    Default: 10.77.2.10
+
+Resources:
+  InboundIdentity:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/cognito-m2m.yaml
+      Parameters:
+        Prefix: !Sub '${Prefix}-inbound'
+        DomainPrefix: !Ref CognitoDomainPrefix
+        ScopeIdentifier: !Ref GatewayScopeIdentifier
+        ScopeName: invoke
+
+  PrivateNetwork:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/private-network.yaml
+      Parameters:
+        Prefix: !Ref Prefix
+        QuickVpcConnectionId: !Ref QuickVpcConnectionId
+        VpcCidr: !Ref VpcCidr
+        SubnetCidrA: !Ref SubnetCidrA
+        SubnetCidrB: !Ref SubnetCidrB
+        ResolverIpAddressA: !Ref ResolverIpAddressA
+        ResolverIpAddressB: !Ref ResolverIpAddressB
+
+  VpcServices:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ../modules/scenario4-vpc-services.yaml
+      Parameters:
+        Prefix: !Ref Prefix
+        SubnetAId: !GetAtt PrivateNetwork.Outputs.SubnetAId
+        SubnetBId: !GetAtt PrivateNetwork.Outputs.SubnetBId
+        BusinessLambdaSecurityGroupId: !GetAtt PrivateNetwork.Outputs.BusinessLambdaSecurityGroupId
+
+  PrivateGateway:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/scenario4-private-native-lambda-gateway.yaml
+      Parameters:
+        Prefix: !Ref Prefix
+        OrderLambdaArn: !GetAtt VpcServices.Outputs.OrderLambdaArn
+        InventoryLambdaArn: !GetAtt VpcServices.Outputs.InventoryLambdaArn
+        DiscoveryUrl: !GetAtt InboundIdentity.Outputs.DiscoveryUrl
+        AllowedClientId: !GetAtt InboundIdentity.Outputs.ClientId
+        AllowedScope: !GetAtt InboundIdentity.Outputs.Scope
+
+  GatewayPrivateEndpoint:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/scenario4-gateway-endpoint.yaml
+      Parameters:
+        VpcId: !GetAtt PrivateNetwork.Outputs.VpcId
+        SubnetAId: !GetAtt PrivateNetwork.Outputs.SubnetAId
+        SubnetBId: !GetAtt PrivateNetwork.Outputs.SubnetBId
+        GatewayEndpointSecurityGroupId: !GetAtt PrivateNetwork.Outputs.GatewayEndpointSecurityGroupId
+        GatewayArn: !GetAtt PrivateGateway.Outputs.GatewayArn
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt PrivateGateway.Outputs.GatewayArn
+  GatewayIdentifier:
+    Value: !GetAtt PrivateGateway.Outputs.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt PrivateGateway.Outputs.GatewayUrl
+  OrderTargetId:
+    Value: !GetAtt PrivateGateway.Outputs.OrderTargetId
+  InventoryTargetId:
+    Value: !GetAtt PrivateGateway.Outputs.InventoryTargetId
+  OrderVpcLambdaArn:
+    Value: !GetAtt VpcServices.Outputs.OrderLambdaArn
+  InventoryVpcLambdaArn:
+    Value: !GetAtt VpcServices.Outputs.InventoryLambdaArn
+  InboundUserPoolId:
+    Value: !GetAtt InboundIdentity.Outputs.UserPoolId
+  InboundClientId:
+    Value: !GetAtt InboundIdentity.Outputs.ClientId
+  InboundScope:
+    Value: !GetAtt InboundIdentity.Outputs.Scope
+  InboundTokenEndpoint:
+    Description: Public Cognito user-pool domain token endpoint.
+    Value: !GetAtt InboundIdentity.Outputs.TokenEndpoint
+  QuickVpcConnectionArn:
+    Value: !GetAtt PrivateNetwork.Outputs.QuickVpcConnectionArn
+  GatewayVpcEndpointId:
+    Value: !GetAtt GatewayPrivateEndpoint.Outputs.GatewayVpcEndpointId
+  ResolverEndpointId:
+    Value: !GetAtt PrivateNetwork.Outputs.ResolverEndpointId
+  ResolverIpAddresses:
+    Value: !GetAtt PrivateNetwork.Outputs.ResolverIpAddresses

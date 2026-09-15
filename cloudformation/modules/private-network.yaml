@@ -1,0 +1,269 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Scenario 4 private MCP network foundation: two-AZ VPC, Resolver inbound
+  endpoint, Quick VPC Connection, Gateway endpoint security group, and an
+  isolated security group for dedicated business Lambdas.
+
+Parameters:
+  Prefix:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{2,24}$'
+  QuickVpcConnectionId:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
+    Description: Unique Quick VPC Connection ID. Use a new value for every Scenario 4 recreation.
+  VpcCidr:
+    Type: String
+    Default: 10.77.0.0/16
+  SubnetCidrA:
+    Type: String
+    Default: 10.77.1.0/24
+  SubnetCidrB:
+    Type: String
+    Default: 10.77.2.0/24
+  ResolverIpAddressA:
+    Type: String
+    Default: 10.77.1.10
+  ResolverIpAddressB:
+    Type: String
+    Default: 10.77.2.10
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-vpc'
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: private-link
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref SubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-private-a'
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref SubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-private-b'
+
+  QuickSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Quick ENIs; DNS and private AgentCore HTTPS only
+      VpcId: !Ref Vpc
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-quick-eni-sg'
+
+  ResolverSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Resolver inbound endpoint from Quick ENIs only
+      VpcId: !Ref Vpc
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-resolver-sg'
+
+  GatewayEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AgentCore Gateway VPCE HTTPS from Quick ENIs only
+      VpcId: !Ref Vpc
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-gateway-vpce-sg'
+
+  BusinessLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Scenario 4 in-memory business Lambdas with no network egress
+      VpcId: !Ref Vpc
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-business-lambda-sg'
+
+  QuickToResolverTcp:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt QuickSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 53
+      ToPort: 53
+      DestinationSecurityGroupId: !GetAtt ResolverSecurityGroup.GroupId
+      Description: DNS TCP to resolver
+
+  QuickToResolverUdp:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt QuickSecurityGroup.GroupId
+      IpProtocol: udp
+      FromPort: 53
+      ToPort: 53
+      DestinationSecurityGroupId: !GetAtt ResolverSecurityGroup.GroupId
+      Description: DNS UDP to resolver
+
+  ResolverFromQuickTcp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt ResolverSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 53
+      ToPort: 53
+      SourceSecurityGroupId: !GetAtt QuickSecurityGroup.GroupId
+      Description: DNS TCP from Quick
+
+  ResolverFromQuickUdp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt ResolverSecurityGroup.GroupId
+      IpProtocol: udp
+      FromPort: 53
+      ToPort: 53
+      SourceSecurityGroupId: !GetAtt QuickSecurityGroup.GroupId
+      Description: DNS UDP from Quick
+
+  QuickToGatewayHttps:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt QuickSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !GetAtt GatewayEndpointSecurityGroup.GroupId
+      Description: HTTPS to AgentCore Gateway VPCE
+
+  GatewayHttpsFromQuick:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt GatewayEndpointSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !GetAtt QuickSecurityGroup.GroupId
+      Description: HTTPS from Quick
+
+  ResolverInboundEndpoint:
+    Type: AWS::Route53Resolver::ResolverEndpoint
+    DependsOn:
+      - ResolverFromQuickTcp
+      - ResolverFromQuickUdp
+    Properties:
+      Name: !Sub '${Prefix}-resolver-inbound'
+      Direction: INBOUND
+      ResolverEndpointType: IPV4
+      Protocols:
+        - Do53
+      SecurityGroupIds:
+        - !GetAtt ResolverSecurityGroup.GroupId
+      IpAddresses:
+        - SubnetId: !Ref SubnetA
+          Ip: !Ref ResolverIpAddressA
+        - SubnetId: !Ref SubnetB
+          Ip: !Ref ResolverIpAddressB
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: private-link
+
+  QuickVpcRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Quick role for Scenario 4 VPC Connection ENI lifecycle
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: quicksight.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: QuickVpcConnectionEniManagement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                Resource: '*'
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: private-link
+
+  QuickVpcConnection:
+    Type: AWS::QuickSight::VPCConnection
+    DependsOn:
+      - ResolverInboundEndpoint
+      - QuickToResolverTcp
+      - QuickToResolverUdp
+      - QuickToGatewayHttps
+    Properties:
+      AwsAccountId: !Ref AWS::AccountId
+      VPCConnectionId: !Ref QuickVpcConnectionId
+      Name: !Ref QuickVpcConnectionId
+      RoleArn: !GetAtt QuickVpcRole.Arn
+      SubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      SecurityGroupIds:
+        - !GetAtt QuickSecurityGroup.GroupId
+      DnsResolvers:
+        - !Ref ResolverIpAddressA
+        - !Ref ResolverIpAddressB
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Scenario
+          Value: private-link
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  SubnetAId:
+    Value: !Ref SubnetA
+  SubnetBId:
+    Value: !Ref SubnetB
+  SubnetIds:
+    Value: !Join [',', [!Ref SubnetA, !Ref SubnetB]]
+  BusinessLambdaSecurityGroupId:
+    Value: !GetAtt BusinessLambdaSecurityGroup.GroupId
+  GatewayEndpointSecurityGroupId:
+    Value: !GetAtt GatewayEndpointSecurityGroup.GroupId
+  ResolverEndpointId:
+    Value: !Ref ResolverInboundEndpoint
+  ResolverIpAddresses:
+    Value: !Join [',', [!Ref ResolverIpAddressA, !Ref ResolverIpAddressB]]
+  QuickVpcConnectionArn:
+    Value: !GetAtt QuickVpcConnection.Arn
+  QuickVpcConnectionId:
+    Value: !Ref QuickVpcConnection

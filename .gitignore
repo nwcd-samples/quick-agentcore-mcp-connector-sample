@@ -1,0 +1,35 @@
+# Python 字节码与缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Lambda 打包产物：由各 lambda_function.py 重新打包，不入库
+function.zip
+*.zip
+
+# 工具缓存
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# 可再生验证结果与演示输出不进入产品仓库
+evidence/
+output/
+
+# 本地 CloudFormation 参数：仅跟踪 *.example.json
+cloudformation/parameters/*.json
+!cloudformation/parameters/*.example.json
+
+# 本地或遗留工具生成的环境状态
+gateway/**/config/deployed-state.json
+
+# 本地敏感配置不入库
+*.local.json
+
+# Kiro 内部规划与任务历史不进入产品仓库
+.kiro/
+
+# 操作系统产物
+.DS_Store

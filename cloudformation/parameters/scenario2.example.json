@@ -1,0 +1,16 @@
+[
+  {"ParameterKey":"Prefix","ParameterValue":"quick-s2"},
+  {"ParameterKey":"CognitoDomainPrefix","ParameterValue":"replace-me-quick-s2"},
+  {"ParameterKey":"GatewayScopeIdentifier","ParameterValue":"https://quick-agentcore.example.com/scenario2"},
+  {"ParameterKey":"OrderBasicAuthToolLambdaArn","ParameterValue":"arn:<AWS_PARTITION>:lambda:<AWS_REGION>:111122223333:function:order-basic-auth-tool"},
+  {"ParameterKey":"InventoryToolLambdaArn","ParameterValue":"arn:<AWS_PARTITION>:lambda:<AWS_REGION>:111122223333:function:inventory-tool"},
+  {"ParameterKey":"OrderBasicSecretArn","ParameterValue":"arn:<AWS_PARTITION>:secretsmanager:<AWS_REGION>:111122223333:secret:quick-agentcore/order-basic-auth-tool-EXAMPLE"},
+  {"ParameterKey":"OrderBasicSecretJsonKey","ParameterValue":"base64Credentials"},
+  {"ParameterKey":"EntraTenantId","ParameterValue":"11111111-1111-4111-8111-111111111111"},
+  {"ParameterKey":"InventoryApiApplicationId","ParameterValue":"22222222-2222-4222-8222-222222222222"},
+  {"ParameterKey":"InventoryClientApplicationId","ParameterValue":"33333333-3333-4333-8333-333333333333"},
+  {"ParameterKey":"InventoryOAuthClientSecretArn","ParameterValue":"arn:<AWS_PARTITION>:secretsmanager:<AWS_REGION>:111122223333:secret:quick-s2/inventory-entra-EXAMPLE"},
+  {"ParameterKey":"InventoryOAuthClientSecretJsonKey","ParameterValue":"clientSecret"},
+  {"ParameterKey":"InventoryAppRole","ParameterValue":"InventoryReader"},
+  {"ParameterKey":"StageName","ParameterValue":"prod"}
+]

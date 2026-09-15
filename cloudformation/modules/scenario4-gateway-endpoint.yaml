@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scenario 4 AgentCore Gateway interface endpoint with an exact Gateway policy.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  SubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  GatewayEndpointSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  GatewayArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:bedrock-agentcore:[^:]+:[0-9]{12}:gateway/.+$'
+
+Resources:
+  GatewayVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.bedrock-agentcore.gateway'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref SubnetAId
+        - !Ref SubnetBId
+      SecurityGroupIds:
+        - !Ref GatewayEndpointSecurityGroupId
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowOnlyScenario4GatewayInvoke
+            Effect: Allow
+            Principal: '*'
+            Action: bedrock-agentcore:InvokeGateway
+            Resource: !Ref GatewayArn
+
+Outputs:
+  GatewayVpcEndpointId:
+    Value: !Ref GatewayVpcEndpoint

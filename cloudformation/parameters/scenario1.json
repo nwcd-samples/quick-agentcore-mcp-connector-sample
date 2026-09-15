@@ -1,0 +1,7 @@
+[
+  {"ParameterKey":"Prefix","ParameterValue":"quick-agentcore-s1"},
+  {"ParameterKey":"CognitoDomainPrefix","ParameterValue":"quick-agentcore-s1"},
+  {"ParameterKey":"GatewayScopeIdentifier","ParameterValue":"https://quick-agentcore.example.com/scenario1"},
+  {"ParameterKey":"OrderToolLambdaArn","ParameterValue":"arn:aws:lambda:us-east-1:271547278201:function:order-tool"},
+  {"ParameterKey":"InventoryToolLambdaArn","ParameterValue":"arn:aws:lambda:us-east-1:271547278201:function:inventory-tool"}
+]

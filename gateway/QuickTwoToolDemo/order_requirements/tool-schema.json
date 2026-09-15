@@ -1,0 +1,18 @@
+{
+  "name": "get_order_requirements",
+  "description": "Always call this read-only tool first when a user asks to verify an order against inventory. It returns the complete, validated and aggregated SKU/warehouse requirements for the order. On SUCCESS, pass order_id, requirements and requirements_checksum unchanged to check_inventory_availability. Never invent or modify quantities.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "order_id": {
+        "type": "string",
+        "description": "Demo order identifier, for example ORDER-1001.",
+        "pattern": "^ORDER-[A-Z0-9-]{1,32}$",
+        "minLength": 7,
+        "maxLength": 38
+      }
+    },
+    "required": ["order_id"],
+    "additionalProperties": false
+  }
+}

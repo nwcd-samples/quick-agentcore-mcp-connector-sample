@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  AgentCore MCP Gateway with exactly two read-only native Lambda targets. The
+  business functions are external resources referenced only by ARN.
+
+Parameters:
+  Prefix:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{2,30}$'
+  OrderToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:order-tool(?::[^:]+)?$'
+  InventoryToolLambdaArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:inventory-tool(?::[^:]+)?$'
+  DiscoveryUrl:
+    Type: String
+    AllowedPattern: '^https://.+/\.well-known/openid-configuration$'
+  AllowedClientId:
+    Type: String
+    MinLength: 1
+  AllowedScope:
+    Type: String
+    MinLength: 1
+
+Resources:
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: !Sub '${Prefix} AgentCore role; invoke only the two supplied business Lambdas'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*'
+      Policies:
+        - PolicyName: InvokeOnlyApprovedBusinessTools
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeOnlyOrderAndInventory
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !Ref OrderToolLambdaArn
+                  - !Ref InventoryToolLambdaArn
+      Tags:
+        - Key: Project
+          Value: quick-agentcore-security-blog
+        - Key: Component
+          Value: native-lambda-gateway
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub '${Prefix}-gateway'
+      Description: Two read-only native Lambda tools protected by JWT
+      RoleArn: !GetAtt GatewayRole.Arn
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Ref DiscoveryUrl
+          AllowedClients:
+            - !Ref AllowedClientId
+          AllowedScopes:
+            - !Ref AllowedScope
+      Tags:
+        Project: quick-agentcore-security-blog
+        Component: native-lambda-gateway
+
+  OrderTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-order-requirements'
+      Description: Read complete and aggregated requirements for one order
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !Ref OrderToolLambdaArn
+            ToolSchema:
+              InlinePayload:
+                - Name: get_order_requirements
+                  Description: >-
+                    Always call this read-only tool first. It returns the
+                    complete aggregated requirements and a handoff checksum.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      order_id:
+                        Type: string
+                        Description: Order identifier such as ORDER-1001
+                    Required:
+                      - order_id
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+
+  InventoryTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: !Sub '${Prefix}-inventory-availability'
+      Description: Validate the order handoff and calculate fulfillment risk
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !Ref InventoryToolLambdaArn
+            ToolSchema:
+              InlinePayload:
+                - Name: check_inventory_availability
+                  Description: >-
+                    Call only after get_order_requirements succeeds and pass
+                    its order_id, requirements, and checksum unchanged.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      order_id:
+                        Type: string
+                      requirements:
+                        Type: array
+                        Items:
+                          Type: object
+                          Properties:
+                            sku:
+                              Type: string
+                            warehouse_id:
+                              Type: string
+                            required_quantity:
+                              Type: integer
+                          Required:
+                            - sku
+                            - warehouse_id
+                            - required_quantity
+                      requirements_checksum:
+                        Type: string
+                        Description: SHA-256 checksum returned by the order tool
+                    Required:
+                      - order_id
+                      - requirements
+                      - requirements_checksum
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt Gateway.GatewayArn
+  GatewayIdentifier:
+    Value: !GetAtt Gateway.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt Gateway.GatewayUrl
+  GatewayRoleArn:
+    Value: !GetAtt GatewayRole.Arn
+  OrderTargetId:
+    Value: !GetAtt OrderTarget.TargetId
+  InventoryTargetId:
+    Value: !GetAtt InventoryTarget.TargetId

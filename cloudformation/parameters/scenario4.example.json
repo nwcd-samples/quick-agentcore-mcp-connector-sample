@@ -1,0 +1,11 @@
+[
+  {"ParameterKey":"Prefix","ParameterValue":"quick-s4"},
+  {"ParameterKey":"CognitoDomainPrefix","ParameterValue":"replace-me-quick-s4"},
+  {"ParameterKey":"GatewayScopeIdentifier","ParameterValue":"https://quick-agentcore.example.com/scenario4"},
+  {"ParameterKey":"QuickVpcConnectionId","ParameterValue":"<QUICK_VPC_CONNECTION_ID>"},
+  {"ParameterKey":"VpcCidr","ParameterValue":"10.77.0.0/16"},
+  {"ParameterKey":"SubnetCidrA","ParameterValue":"10.77.1.0/24"},
+  {"ParameterKey":"SubnetCidrB","ParameterValue":"10.77.2.0/24"},
+  {"ParameterKey":"ResolverIpAddressA","ParameterValue":"10.77.1.10"},
+  {"ParameterKey":"ResolverIpAddressB","ParameterValue":"10.77.2.10"}
+]

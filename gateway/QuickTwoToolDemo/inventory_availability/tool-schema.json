@@ -1,0 +1,47 @@
+{
+  "name": "check_inventory_availability",
+  "description": "Call this read-only tool only after get_order_requirements returns SUCCESS. Pass its order_id, requirements and requirements_checksum unchanged. This tool validates the handoff, reads available inventory, and deterministically returns shortages, partial failures and fulfillment risk. Do not calculate quantities yourself.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "order_id": {
+        "type": "string",
+        "pattern": "^ORDER-[A-Z0-9-]{1,32}$",
+        "minLength": 7,
+        "maxLength": 38
+      },
+      "requirements": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "properties": {
+            "sku": {
+              "type": "string",
+              "pattern": "^[A-Z0-9-]{1,32}$"
+            },
+            "warehouse_id": {
+              "type": "string",
+              "pattern": "^[A-Z0-9-]{1,32}$"
+            },
+            "required_quantity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            }
+          },
+          "required": ["sku", "warehouse_id", "required_quantity"],
+          "additionalProperties": false
+        }
+      },
+      "requirements_checksum": {
+        "type": "string",
+        "description": "SHA-256 checksum returned by get_order_requirements; pass it unchanged.",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "required": ["order_id", "requirements", "requirements_checksum"],
+    "additionalProperties": false
+  }
+}

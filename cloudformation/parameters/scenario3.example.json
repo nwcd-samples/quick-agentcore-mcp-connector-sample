@@ -1,0 +1,15 @@
+[
+  {"ParameterKey":"Prefix","ParameterValue":"quick-s3"},
+  {"ParameterKey":"OrderToolLambdaArn","ParameterValue":"arn:<AWS_PARTITION>:lambda:<AWS_REGION>:111122223333:function:order-tool"},
+  {"ParameterKey":"InventoryToolLambdaArn","ParameterValue":"arn:<AWS_PARTITION>:lambda:<AWS_REGION>:111122223333:function:inventory-tool"},
+  {"ParameterKey":"EntraTenantId","ParameterValue":"00000000-0000-0000-0000-000000000001"},
+  {"ParameterKey":"GatewayApiApplicationId","ParameterValue":"00000000-0000-0000-0000-000000000002"},
+  {"ParameterKey":"QuickClientApplicationId","ParameterValue":"00000000-0000-0000-0000-000000000003"},
+  {"ParameterKey":"OrderApiApplicationId","ParameterValue":"00000000-0000-0000-0000-000000000004"},
+  {"ParameterKey":"InventoryApiApplicationId","ParameterValue":"00000000-0000-0000-0000-000000000005"},
+  {"ParameterKey":"GatewayInboundScope","ParameterValue":"mcp.invoke"},
+  {"ParameterKey":"OrderRequiredRole","ParameterValue":"OrdersReader"},
+  {"ParameterKey":"InventoryRequiredRole","ParameterValue":"InventoryReader"},
+  {"ParameterKey":"GatewayOboClientSecretArn","ParameterValue":"arn:<AWS_PARTITION>:secretsmanager:<AWS_REGION>:111122223333:secret:quick-s3/gateway-obo-EXAMPLE"},
+  {"ParameterKey":"GatewayOboClientSecretJsonKey","ParameterValue":"clientSecret"}
+]

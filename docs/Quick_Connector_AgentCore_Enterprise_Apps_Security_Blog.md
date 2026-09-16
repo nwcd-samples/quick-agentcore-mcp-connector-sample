@@ -4,7 +4,7 @@
 
 本文以“查询订单需求，再检查库存可用性”为例，演示通过 Amazon Quick MCP 连接器和 Amazon Bedrock AgentCore Gateway 安全访问企业应用的四种典型场景：服务身份访问、混合下游认证、用户身份委托，以及私网访问。四个场景使用相同的只读业务逻辑，分别展示不同的身份、凭据和网络边界。
 
-本文面向已采用 Microsoft Entra ID 作为身份提供商（IdP），并完成 Amazon Quick 单点登录（SSO）配置的企业客户。SSO 配置可参考 https://aws.amazon.com/cn/blogs/china/microsoft-entra-id-integration-iam-identity-center-implement/。
+本文面向已采用 Microsoft Entra ID 作为身份提供商（IdP），并完成 Amazon Quick 单点登录（SSO）配置的企业客户。SSO 配置可参考 https://aws.amazon.com/cn/blogs/china/microsoft-entra-id-integration-iam-identity-center-implement/
 
 ## 方案概览
 
@@ -396,7 +396,7 @@ stage variables 保存预期的 tenant、客户端和 app role。两个 API 的 
 
 *图 26：场景二的库存 target 凭据配置。*
 
-本示例选择 OpenAPI target 以配置所需的出站凭据。选择其他 target 类型时，应核对其支持的认证方式，参见 https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-outbound-auth.html。
+本示例选择 OpenAPI target 以配置所需的出站凭据。选择其他 target 类型时，应核对其支持的认证方式，参见 https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-outbound-auth.html
 
 除 Gateway、target 和入站 Cognito 输出外，还需记录以下输出。
 
@@ -575,7 +575,7 @@ Gateway 的入站校验包括：issuer 属于指定 Entra ID tenant，audience �
 
 #### 步骤 5：注册 Quick Client
 
-注册名为 `Quick Client` 的应用，在 **Authentication → Add a platform → Web** 中添加步骤 1 记录的 Redirect URL。本场景使用带 client secret 的 authorization code flow，因此选择 Web 平台，不启用 implicit grant。重定向 URI 使用模板  https://<REGION>.quicksight.aws.amazon.com/sn/oauthcallback, 其中 `REGION` 为 Quick 开通所在的 AWS 区域。
+注册名为 `Quick Client` 的应用，在 **Authentication → Add a platform → Web** 中添加步骤 1 记录的 Redirect URL。本场景使用带 client secret 的 authorization code flow，因此选择 Web 平台，不启用 implicit grant。重定向 URI 使用模板  https://<REGION>.quicksight.aws.amazon.com/sn/oauthcallback , 其中 `REGION` 为 Quick 开通所在的 AWS 区域。
 
 ![Quick Client 的 Web 回调地址配置](image/image-20260913112506341.png)
 
@@ -816,7 +816,7 @@ flowchart LR
     G -->|IAM: InvokeFunction| I[库存 VPC Lambda]
 ```
 
-Quick 支持分别配置 resource-server VPC connection（`VpcConnectionArn`）和 auth-server VPC connection（`AuthVpcConnectionArn`），用于承载 MCP 流量和 OAuth 流量。如果授权服务器提供可从 VPC 访问的 OAuth endpoint，可以独立配置其 auth-server VPC connection。具体配置见https://docs.aws.amazon.com/quick/latest/userguide/mcp-integration.html。**本场景的 auth-server 保持 Public network，是由 Cognito user-pool domain 的访问方式决定的。** Cognito 的 domain OAuth endpoint、managed login 和 hosted UI 不支持通过 Cognito PrivateLink 访问，`cognito-idp` interface endpoint 也不接收 user-pool domain 请求。因此，本示例的 `/oauth2/token` 继续使用公共网络路径。相关限制见https://docs.aws.amazon.com/cognito/latest/developerguide/vpc-interface-endpoints.html。
+Quick 支持分别配置 resource-server VPC connection（`VpcConnectionArn`）和 auth-server VPC connection（`AuthVpcConnectionArn`），用于承载 MCP 流量和 OAuth 流量。如果授权服务器提供可从 VPC 访问的 OAuth endpoint，可以独立配置其 auth-server VPC connection。具体配置见https://docs.aws.amazon.com/quick/latest/userguide/mcp-integration.html 。**本场景的 auth-server 保持 Public network，是由 Cognito user-pool domain 的访问方式决定的。** Cognito 的 domain OAuth endpoint、managed login 和 hosted UI 不支持通过 Cognito PrivateLink 访问，`cognito-idp` interface endpoint 也不接收 user-pool domain 请求。因此，本示例的 `/oauth2/token` 继续使用公共网络路径。相关限制见https://docs.aws.amazon.com/cognito/latest/developerguide/vpc-interface-endpoints.html
 
 Quick VPC 连接通过 Route 53 Resolver 解析 Gateway 域名；启用 private DNS 后，MCP 请求通过 Gateway interface VPC endpoint 到达服务。endpoint policy 仅允许对当前 Gateway ARN 执行 `bedrock-agentcore:InvokeGateway`，Gateway 的 JWT authorizer 则继续校验 Cognito token。
 

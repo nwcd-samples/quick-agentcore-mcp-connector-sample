@@ -50,7 +50,7 @@ OAuth 2.0 client credentials flow（客户端凭据流程）使用应用身份�
 
 ### 部署范围
 
-四个场景的根模板位于 [`cloudformation/scenarios/`](../cloudformation/scenarios/)，由 [`cloudformation/deploy.sh`](../cloudformation/deploy.sh) 打包并部署。完整参数、输出和验证命令见 [CloudFormation 部署说明](../cloudformation/README.md)。
+四个场景的根模板位于 [`cloudformation/scenarios/`](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/tree/master/cloudformation/scenarios)，由 [`cloudformation/deploy.sh`](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/blob/master/cloudformation/deploy.sh) 打包并部署。完整参数、输出和验证命令见 [CloudFormation 部署说明](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/blob/master/cloudformation/README.md)。
 
 | 场景栈管理的资源 | 需要单独准备或管理的资源 |
 | --- | --- |
@@ -92,7 +92,7 @@ OAuth 2.0 client credentials flow（客户端凭据流程）使用应用身份�
    python3 business-lambdas/deploy.py --region "$AWS_REGION"
    ```
 
-   该脚本独立管理三个业务函数及其所需资源。具体管理边界见 [业务 Lambda 部署说明](../cloudformation/README.md#11-业务-lambda-bootstrap)。
+   该脚本独立管理三个业务函数及其所需资源。具体管理边界见 [业务 Lambda 部署说明](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/blob/master/cloudformation/README.md#11-%E4%B8%9A%E5%8A%A1-lambda-bootstrap)。
 
 ### 部署所选场景
 
@@ -956,4 +956,4 @@ aws cloudformation wait stack-delete-complete \
 
 这些能力可以按业务需求组合。无论选择哪个场景，都应分别设计 Quick 登录、Gateway 入站访问和下游业务访问三条信任边界，让工具调用与企业既有的身份、权限和网络策略保持一致。
 
-完整部署参数与验证步骤见 [CloudFormation 部署说明](../cloudformation/README.md)，用户委托配置见 [Entra ID 配置指南](../gateway/Scenario3UserDelegation/ENTRA_SETUP.md)。
+完整部署参数与验证步骤见 [CloudFormation 部署说明](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/blob/master/cloudformation/README.md)，用户委托配置见 [Entra ID 配置指南](https://github.com/nwcd-samples/quick-agentcore-mcp-connector-sample/blob/master/gateway/Scenario3UserDelegation/ENTRA_SETUP.md)。
